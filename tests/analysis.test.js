@@ -25,8 +25,11 @@ test('findPhases ordering and angles', () => {
 
 test('findPhases tolerates duplicate timestamps', () => {
   const s = makeSwing();
-  s.splice(10, 0, { ...s[10] });
-  assert.ok(findPhases(s).impact > 0);
+  const k = findPhases(s).impact;
+  s[k].t = s[k - 1].t; // dir differs, so an unguarded angle/0 would be Infinity
+  const { impact } = findPhases(s);
+  assert.notEqual(impact, k);
+  assert.ok(Math.abs(impact - k) <= 2);
 });
 
 test('all on is a great job', () => {
