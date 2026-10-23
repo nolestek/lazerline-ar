@@ -51,7 +51,7 @@ const PLACE_PROMPT = 'Aim at the floor and pull the trigger to place the line.';
 const ROTATE_PROMPT = 'Thumbstick left/right to rotate. Trigger to lock.';
 const LINE_LENGTH = 3;
 const ROTATE_RATE = Math.PI / 3;    // 60 deg/s
-const COLORS = { on: '#22c55e', off: '#ff2a2a', skip: '#facc15' };
+export const COLORS = { on: '#22c55e', off: '#ef4444', skip: '#ffd400', unsure: '#9ca3af' };
 
 let renderer, scene, camera, view;
 let session = null;
@@ -179,7 +179,7 @@ function frame() {
       prevFlick = flick;
       line.width = settings.lineWidth;
       view.setText(now < widthMsgUntil ? `Line width: ${Math.round(settings.lineWidth * 100)} cm` : null, camera);
-      view.setLine(line, COLORS[classify(headHit, buttHit, unsure, line)]);
+      view.setLine(line, unsure ? COLORS.unsure : COLORS[classify(headHit, buttHit, unsure, line)]);
       break;
     }
   }
