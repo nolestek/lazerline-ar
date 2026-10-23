@@ -96,6 +96,8 @@ function hideGhost() {
 function startReplay(time) {
   if (!lastSwing) return;
   replay = { samples: lastSwing, start: time, i: 0 };
+  view.setTrail(lastSwing);
+  resultText = summarize(lastSwing).message;
   liveSwing = []; detState = 'idle'; prevSample = null; // detector is not fed during replay
 }
 
@@ -141,7 +143,8 @@ async function startSession() {
   line = null;
   session.addEventListener('select', onSelect);
   session.addEventListener('squeezestart', (e) => {
-    if (appState === 'ready' && e.inputSource === clubSrc) startReplay(performance.now());
+    // Only when idle: a grip press must never abort a swing or cancel address.
+    if (appState === 'ready' && e.inputSource === clubSrc && detState === 'idle') startReplay(performance.now());
   });
   resetSwing();
   session.addEventListener('end', onEnd);
@@ -245,8 +248,6 @@ function frame(time) {
         }
         if (r.swing) {
           lastSwing = r.swing; liveSwing = [];
-          view.setTrail(r.swing);
-          resultText = summarize(r.swing).message;
           startReplay(time);
         } else if (r.state === 'swinging') {
           if (detState !== 'swinging') liveSwing = prevSample ? [prevSample] : [];
