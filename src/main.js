@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { floorHit, lineOffset, DOT_CAP, LINE_LENGTH } from './geometry.js';
+import { floorHit, nearLine, LINE_LENGTH } from './geometry.js';
 import { classify, summarize } from './analysis.js';
 import { createSwingDetector } from './swing.js';
 import { loadSettings, saveSettings, WIDTH_MIN, WIDTH_MAX, WIDTH_STEP } from './settings.js';
@@ -66,6 +66,7 @@ let prevB = false;
 let prevA = false;
 let prevClick = false;
 let line = null;                    // {cx, cz, angle, length, width}
+let lineLocked = false;             // true once the trigger locked the line
 let placing = 'aim';                // 'aim' | 'rotate' (within state 'place')
 let headHit = null;
 let buttHit = null;
@@ -79,7 +80,7 @@ let resultText = null;
 let detState = 'idle';
 let prevSample = null;
 const detector = createSwingDetector({
-  addressNear: (h) => h && Math.abs(lineOffset(h, line).across) < 0.5 && Math.abs(lineOffset(h, line).along) < line.length / 2,
+  addressNear: (h) => nearLine(h, line),
 });
 
 function resetSwing() {
@@ -153,6 +154,7 @@ async function startSession() {
   prevA = false;
   prevClick = false;
   line = null;
+  lineLocked = false;
   session.addEventListener('select', onSelect);
   session.addEventListener('inputsourceschange', onSourcesChange);
   resetSwing();
@@ -179,7 +181,7 @@ function onSourcesChange(e) {
 function onSelect(e) {
   if (appState === 'place') {
     if (e.inputSource !== clubSrc || !line) return;
-    if (placing === 'aim') placing = 'rotate'; else appState = 'ready';
+    if (placing === 'aim') placing = 'rotate'; else { appState = 'ready'; lineLocked = true; }
     return;
   }
   if (appState !== 'calibrate') return;
@@ -192,7 +194,7 @@ function onSelect(e) {
   const poseQuat = new THREE.Quaternion(q.x, q.y, q.z, q.w);
   axisLocal.set(0, -1, 0).applyQuaternion(poseQuat.clone().invert());
   // Recalibrating keeps a placed line; A re-places it.
-  appState = line ? 'ready' : 'place';
+  appState = lineLocked ? 'ready' : 'place';
   placing = 'aim';
 }
 
@@ -221,7 +223,7 @@ function tick(time) {
   // Button A re-places the line without recalibrating.
   let a = false;
   for (const s of session.inputSources) a = a || !!s.gamepad?.buttons[A_BUTTON]?.pressed;
-  if (a && !prevA && idle && !replay && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; resetSwing(); }
+  if (a && !prevA && idle && !replay && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; lineLocked = false; resetSwing(); }
   prevA = a;
   // Thumbstick click on the club replays the last swing (not grip: holding the controller squeezes it).
   const click = !!clubSrc?.gamepad?.buttons[STICK_CLICK]?.pressed;
@@ -327,8 +329,8 @@ function updateClub(pose) {
   view.setStick(butt, head, STICK_COLOR);
   // Hits are cast from pos, not the tips: a tip may sit below the floor at address.
   const radius = (settings.lineWidth ?? 0.15) / 2;
-  headHit = floorHit(pos, axis, DOT_CAP);
-  buttHit = floorHit(pos, axis.clone().negate(), DOT_CAP);
+  headHit = floorHit(pos, axis);
+  buttHit = floorHit(pos, axis.clone().negate());
   view.setLaser('head', head, headHit, false, radius);
   view.setLaser('butt', butt, buttHit, false, radius);
   return { pos, axis };

@@ -1,8 +1,9 @@
 // Swing scoring and phase detection. Pure, no three.js.
-import { isOnLine, angleBetween } from './geometry.js';
+import { isOnLine, lineOffset, angleBetween } from './geometry.js';
 
 export function classify(head, butt, unsure, line) {
-  const dots = [head, butt].filter(Boolean);
+  // Dots past the painted ends can't be judged, so they aren't scored.
+  const dots = [head, butt].filter((d) => d && Math.abs(lineOffset(d, line).along) <= line.length / 2);
   if (unsure || !dots.length) return 'skip';
   return dots.every((d) => isOnLine(d, line)) ? 'on' : 'off';
 }

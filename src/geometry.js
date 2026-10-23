@@ -2,7 +2,6 @@
 
 const MAX_HORIZONTAL_DIST = 4;
 export const LINE_LENGTH = 3;
-export const DOT_CAP = 1.0; // m horizontal from the controller; keeps dots inside the 3 m line on an in-plane swing
 
 /**
  * Where a ray hits the floor (plane y = 0), or null.
@@ -37,4 +36,11 @@ export function angleBetween(a, b) {
   const dot = a.x * b.x + a.y * b.y + a.z * b.z;
   const cos = dot / (Math.hypot(a.x, a.y, a.z) * Math.hypot(b.x, b.y, b.z));
   return Math.acos(Math.min(1, Math.max(-1, cos)));
+}
+
+/** Address zone: a head dot within 0.5 m of the line and inside its length. */
+export function nearLine(h, line) {
+  if (!h) return false;
+  const { along, across } = lineOffset(h, line);
+  return Math.abs(across) < 0.5 && Math.abs(along) < line.length / 2;
 }

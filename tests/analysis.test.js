@@ -6,6 +6,14 @@ import { makeSwing, ANGLE } from './fixtures.js';
 const line = { cx: 0, cz: 0, angle: 0, length: 3, width: 0.15 };
 const ON = { x: 0, z: 0 }, OFF = { x: 0, z: 1 };
 
+test('classify ignores dots past the ends of the line', () => {
+  const END = { x: 2, z: 0 }, END_SIDE = { x: 2, z: 1 };
+  assert.equal(classify(END, null, false, line), 'skip');
+  assert.equal(classify(END_SIDE, null, false, line), 'skip');
+  assert.equal(classify(END, ON, false, line), 'on');
+  assert.equal(classify(END, OFF, false, line), 'off');
+});
+
 test('classify', () => {
   assert.equal(classify(ON, null, false, line), 'on');
   assert.equal(classify(ON, ON, false, line), 'on');

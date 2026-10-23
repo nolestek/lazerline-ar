@@ -73,7 +73,7 @@ Through a normal swing this naturally gives: the clubhead dot during takeaway, t
 - Placement: aim the club at the floor and pull the trigger. The line's center snaps to the clubhead dot. Thumbstick left/right rotates the line around that point. Trigger again locks it.
 - The line is a flat strip on the floor, ~3 m long by default (builder's call), yellow when idle.
 - Width: thumbstick up/down (or A/B) steps the width up and down, with a visible readout. Remember the last width (and mode, club length) in localStorage.
-- "On the line" = the dot's perpendicular distance from the line's center line (measured in the floor plane) is ≤ half the width. Dots past the ends of the line count as off.
+- "On the line" = the dot's perpendicular distance from the line's center line (measured in the floor plane) is ≤ half the width. Dots past the ends of the line are not scored (the line isn't long enough to judge there); dots beside the line count as off.
 - Live color: green while the active dot is on, red while off.
 - Re-place the line anytime from a button.
 
