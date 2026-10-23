@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LazerLine AR</title>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+<style>
+  body { font: 18px system-ui, sans-serif; background: #111; color: #eee; margin: 0; padding: 24px; }
+  form { max-width: 28rem; display: grid; gap: 16px; }
+  fieldset { border: 1px solid #444; border-radius: 8px; }
+  label { display: block; margin: 6px 0; }
+  select, input[type=number], button { font: inherit; padding: 8px 12px; }
+  button { background: #22c55e; border: 0; border-radius: 8px; color: #000; }
+  button:disabled { background: #444; color: #999; }
+  #msg { color: #fbbf24; }
+</style>
+</head>
+<body>
+<h1>LazerLine AR</h1>
+<form id="start">
+  <fieldset>
+    <legend>Mode</legend>
+    <label><input type="radio" name="mode" value="adapter"> Club adapter</label>
+    <label><input type="radio" name="mode" value="controller"> Controller only</label>
+  </fieldset>
+  <label>Club length
+    <select id="clubLength">
+      <option value="0.9">Wedge (0.90 m)</option>
+      <option value="0.95">7-iron (0.95 m)</option>
+      <option value="1.15">Driver (1.15 m)</option>
+    </select>
+  </label>
+  <label id="gripRow">Grip length (m)
+    <input id="gripLength" type="number" min="0" max="0.8" step="0.05">
+  </label>
+  <button id="enter" type="button" disabled>Enter AR</button>
+  <p id="msg"></p>
+</form>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
