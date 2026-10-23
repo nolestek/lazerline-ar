@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { floorHit } from './geometry.js';
-import { classify } from './analysis.js';
+import { floorHit, lineOffset } from './geometry.js';
+import { classify, summarize } from './analysis.js';
+import { createSwingDetector } from './swing.js';
 import { loadSettings, saveSettings, WIDTH_MIN, WIDTH_MAX, WIDTH_STEP } from './settings.js';
-import { createView } from './view.js';
+import { createView, COLORS } from './view.js';
 
 let store;
 try { store = localStorage; } catch { /* blocked: defaults, nothing persists */ }
@@ -51,7 +52,7 @@ const PLACE_PROMPT = 'Aim at the floor and pull the trigger to place the line.';
 const ROTATE_PROMPT = 'Thumbstick left/right to rotate. Trigger to lock.';
 const LINE_LENGTH = 3;
 const ROTATE_RATE = Math.PI / 3;    // 60 deg/s
-export const COLORS = { on: '#22c55e', off: '#ef4444', skip: '#ffd400', unsure: '#9ca3af' };
+const REPLAY_SPEED = 0.25;
 
 let renderer, scene, camera, view;
 let session = null;
@@ -68,6 +69,50 @@ let buttHit = null;
 let lastT = 0;
 let prevFlick = 0;
 let widthMsgUntil = 0;
+let liveSwing = [];                 // in-progress samples, shown as the live trail
+let lastSwing = null;               // last completed swing, for replay
+let replay = null;                  // {samples, start (ms), i} while the ghost plays
+let resultText = null;
+let detState = 'idle';
+let prevSample = null;
+const detector = createSwingDetector({
+  addressNear: (h) => h && Math.abs(lineOffset(h, line).across) < 0.5 && Math.abs(lineOffset(h, line).along) < line.length / 2,
+});
+const stateColor = (s) => (s.state === 'skip' ? COLORS.unsure : COLORS[s.state]);
+
+function resetSwing() {
+  replay = null; lastSwing = null; liveSwing = []; resultText = null; detState = 'idle'; prevSample = null;
+  detector.reset();
+  view?.clearTrail();
+  hideGhost();
+}
+
+function hideGhost() {
+  view.setStick(null, null, null, true);
+  view.setLaser('head', null, null, true);
+  view.setLaser('butt', null, null, true);
+}
+
+function startReplay(time) {
+  if (!lastSwing) return;
+  replay = { samples: lastSwing, start: time, i: 0 };
+  liveSwing = []; detState = 'idle'; prevSample = null; // detector is not fed during replay
+}
+
+// Advance the ghost to the sample at 0.25x elapsed time; false once it has finished.
+function stepReplay(time) {
+  const { samples, start } = replay;
+  const target = samples[0].t + ((time - start) / 1000) * REPLAY_SPEED;
+  if (target > samples[samples.length - 1].t) return false;
+  while (replay.i + 1 < samples.length && samples[replay.i + 1].t <= target) replay.i++;
+  const s = samples[replay.i];
+  const { butt, head } = clubEnds(s.pos, s.dir);
+  const radius = line.width / 2;
+  view.setStick(butt, head, stateColor(s), true);
+  view.setLaser('head', head, s.head, true, radius);
+  view.setLaser('butt', butt, s.butt, true, radius);
+  return true;
+}
 
 async function startSession() {
   enterBtn.disabled = true;
@@ -95,6 +140,10 @@ async function startSession() {
   prevA = false;
   line = null;
   session.addEventListener('select', onSelect);
+  session.addEventListener('squeezestart', (e) => {
+    if (appState === 'ready' && e.inputSource === clubSrc) startReplay(performance.now());
+  });
+  resetSwing();
   session.addEventListener('end', onEnd);
   form.style.display = 'none';
   renderer.setAnimationLoop(frame);
@@ -126,19 +175,19 @@ function onSelect(e) {
   line = null;
 }
 
-function frame() {
+function frame(time) {
   const xrFrame = renderer.xr.getFrame();
   const ref = renderer.xr.getReferenceSpace();
 
   // Button B (any controller) re-runs calibration, edge-triggered.
   let b = false;
   for (const s of session.inputSources) b = b || !!s.gamepad?.buttons[B_BUTTON]?.pressed;
-  if (b && !prevB) { appState = 'calibrate'; clubSrc = null; }
+  if (b && !prevB) { appState = 'calibrate'; clubSrc = null; resetSwing(); }
   prevB = b;
   // Button A re-places the line without recalibrating.
   let a = false;
   for (const s of session.inputSources) a = a || !!s.gamepad?.buttons[A_BUTTON]?.pressed;
-  if (a && !prevA && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; }
+  if (a && !prevA && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; resetSwing(); }
   prevA = a;
 
   const now = performance.now();
@@ -166,8 +215,8 @@ function frame() {
       }
       view.setLine(line, COLORS.skip);
       break;
-    case 'ready': { // Task 7 adds swing detection here
-      if (pose) updateClub(pose); else hideClub();
+    case 'ready': {
+      const club = pose ? updateClub(pose) : (hideClub(), null);
       const y = axes[3] ?? 0;
       const flick = Math.abs(y) > 0.7 ? Math.sign(y) : 0;
       if (flick && flick !== prevFlick) {
@@ -178,8 +227,38 @@ function frame() {
       }
       prevFlick = flick;
       line.width = settings.lineWidth;
-      view.setText(now < widthMsgUntil ? `Line width: ${Math.round(settings.lineWidth * 100)} cm` : null, camera);
-      view.setLine(line, unsure ? COLORS.unsure : COLORS[classify(headHit, buttHit, unsure, line)]);
+      const state = classify(headHit, buttHit, unsure, line);
+      view.setLine(line, unsure ? COLORS.unsure : COLORS[state]);
+
+      if (replay) {
+        if (!stepReplay(time)) { replay = null; hideGhost(); detector.reset(); }
+      } else {
+        // Plain copies: updateClub's vectors are not reused, but samples must never alias live state.
+        const sample = club && {
+          t: time / 1000, pos: { x: club.pos.x, y: club.pos.y, z: club.pos.z },
+          dir: { x: club.axis.x, y: club.axis.y, z: club.axis.z }, unsure,
+          head: headHit && { x: headHit.x, z: headHit.z }, butt: buttHit && { x: buttHit.x, z: buttHit.z }, state,
+        };
+        const r = detector.update(sample);
+        if (r.state === 'address' && detState !== 'address') {
+          view.clearTrail(); resultText = null; hideGhost(); liveSwing = [];
+        }
+        if (r.swing) {
+          lastSwing = r.swing; liveSwing = [];
+          view.setTrail(r.swing);
+          resultText = summarize(r.swing).message;
+          startReplay(time);
+        } else if (r.state === 'swinging') {
+          if (detState !== 'swinging') liveSwing = prevSample ? [prevSample] : [];
+          if (sample) liveSwing.push(sample);
+          view.setTrail(liveSwing);
+        } else if (detState === 'swinging') { // abandoned (timeout or lost tracking)
+          liveSwing = []; view.clearTrail();
+        }
+        detState = r.state;
+        prevSample = sample;
+      }
+      view.setText(now < widthMsgUntil ? `Line width: ${Math.round(settings.lineWidth * 100)} cm` : resultText, camera);
       break;
     }
   }
@@ -193,20 +272,29 @@ function hideClub() {
   view.setLaser('butt', null, null);
 }
 
+// Stick ends for a controller position and unit axis toward the clubhead (plain or THREE vectors).
+function clubEnds(p, dir) {
+  const pos = new THREE.Vector3(p.x, p.y, p.z);
+  const axis = new THREE.Vector3(dir.x, dir.y, dir.z);
+  const { mode, clubLength, gripLength } = settings;
+  const adapter = mode === 'adapter';
+  const butt = adapter ? pos.clone().addScaledVector(axis, -gripLength) : pos;
+  const head = pos.clone().addScaledVector(axis, adapter ? clubLength - gripLength : clubLength);
+  return { butt, head };
+}
+
 function updateClub(pose) {
   const p = pose.transform.position;
   const q = pose.transform.orientation;
   const pos = new THREE.Vector3(p.x, p.y, p.z);
   const axis = axisLocal.clone().applyQuaternion(new THREE.Quaternion(q.x, q.y, q.z, q.w)); // toward clubhead
-  const { mode, clubLength, gripLength, lineWidth } = settings;
-  const adapter = mode === 'adapter';
-  const butt = adapter ? pos.clone().addScaledVector(axis, -gripLength) : pos;
-  const head = pos.clone().addScaledVector(axis, adapter ? clubLength - gripLength : clubLength);
+  const { butt, head } = clubEnds(pos, axis);
   view.setStick(butt, head, STICK_COLOR);
   // Hits are cast from pos, not the tips: a tip may sit below the floor at address.
-  const radius = (lineWidth ?? 0.15) / 2;
+  const radius = (settings.lineWidth ?? 0.15) / 2;
   headHit = floorHit(pos, axis);
   buttHit = floorHit(pos, axis.clone().negate());
   view.setLaser('head', head, headHit, false, radius);
   view.setLaser('butt', butt, buttHit, false, radius);
+  return { pos, axis };
 }

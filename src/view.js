@@ -1,7 +1,9 @@
 // three.js objects only; no app logic. main.js drives it through the setters below.
 import * as THREE from 'three';
 
+export const COLORS = { on: '#22c55e', off: '#ef4444', skip: '#ffd400', unsure: '#9ca3af' };
 const RED = '#ff2a2a';
+const TRAIL_Y = 0.002;
 const BEAM_RADIUS = 0.004;
 const TEXT_DISTANCE = 1.5;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -88,14 +90,16 @@ export function createView(scene) {
       g.font = '44px system-ui, sans-serif';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      // Wrap on words so long prompts fit the panel.
+      // Honor explicit newlines, then wrap each paragraph on words so long prompts fit the panel.
       const lines = [];
-      let line = '';
-      for (const w of text.split(' ')) {
-        if (line && g.measureText(line + ' ' + w).width > canvas.width - 80) { lines.push(line); line = w; }
-        else line = line ? line + ' ' + w : w;
+      for (const para of text.split('\n')) {
+        let cur = '';
+        for (const w of para.split(' ')) {
+          if (cur && g.measureText(cur + ' ' + w).width > canvas.width - 80) { lines.push(cur); cur = w; }
+          else cur = cur ? cur + ' ' + w : w;
+        }
+        lines.push(cur);
       }
-      lines.push(line);
       lines.forEach((l, i) => g.fillText(l, canvas.width / 2, canvas.height / 2 + (i - (lines.length - 1) / 2) * 56));
       texture.needsUpdate = true;
     }
@@ -110,5 +114,36 @@ export function createView(scene) {
     panel.visible = true;
   }
 
-  return { setStick, setLaser, setLine, setText };
+  // Rebuilt from the samples each call: swings are a few hundred samples.
+  const trail = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ vertexColors: true }));
+  trail.frustumCulled = false;
+  trail.visible = false;
+  scene.add(trail);
+  const trailColor = { on: COLORS.on, off: COLORS.off };
+
+  function clearTrail() {
+    trail.visible = false;
+  }
+
+  function setTrail(samples) {
+    const pos = [], col = [];
+    const c = new THREE.Color();
+    for (let i = 1; i < samples.length; i++) {
+      const s = samples[i];
+      c.set(trailColor[s.state] ?? COLORS.unsure);
+      for (const k of ['head', 'butt']) {
+        const a = samples[i - 1][k], b = s[k];
+        if (!a || !b) continue;
+        pos.push(a.x, TRAIL_Y, a.z, b.x, TRAIL_Y, b.z);
+        col.push(c.r, c.g, c.b, c.r, c.g, c.b);
+      }
+    }
+    trail.geometry.dispose();
+    trail.geometry = new THREE.BufferGeometry();
+    trail.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    trail.geometry.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    trail.visible = pos.length > 0;
+  }
+
+  return { setStick, setLaser, setLine, setText, setTrail, clearTrail };
 }
