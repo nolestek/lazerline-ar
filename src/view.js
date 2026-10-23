@@ -50,6 +50,20 @@ export function createView(scene) {
     dot.visible = true;
   }
 
+  function setLine(line, color) {
+    const m = get('line', () => {
+      const g = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+      return new THREE.Mesh(g, material(color, false));
+    });
+    if (!line) { m.visible = false; return; }
+    m.material.color.set(color);
+    m.material.opacity = 0.6;
+    m.position.set(line.cx, 0.001, line.cz);
+    m.rotation.y = -line.angle; // plane x-axis -> (cos a, sin a) in (x, z)
+    m.scale.set(line.length, 1, line.width);
+    m.visible = true;
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = 1024; canvas.height = 256;
   const texture = new THREE.CanvasTexture(canvas);
@@ -96,5 +110,5 @@ export function createView(scene) {
     panel.visible = true;
   }
 
-  return { setStick, setLaser, setText };
+  return { setStick, setLaser, setLine, setText };
 }
