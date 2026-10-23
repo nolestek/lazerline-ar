@@ -35,7 +35,7 @@ test('pointing up while still is not address', () => {
 });
 
 test('swing over maxSwing is abandoned', () => {
-  const moving = Array.from({ length: 6 * 72 }, (_, i) => at(0.8 + i / 72, 0.1 + i * 0.05));
+  const moving = Array.from({ length: 11 * 72 }, (_, i) => at(0.8 + i / 72, 0.1 + i * 0.05)); // maxSwing is 10 s
   const res = run(createSwingDetector(), [...still(0.8, 0), ...moving]);
   assert.ok(res.every((r) => !r.swing));
   assert.equal(res.at(-1).state, 'idle');
@@ -69,7 +69,7 @@ test('duplicate timestamps are ignored and do not shift detection', () => {
   assert.equal(b.findIndex((r) => r.state === 'swinging'), a.findIndex((r) => r.state === 'swinging'));
 });
 
-const slowTilt = (t0) => Array.from({ length: 73 }, (_, i) => at(t0 + i / 72, i / 72 * 1.2)); // 1 rad/s, ends dir.y -0.36
+const slowTilt = (t0) => Array.from({ length: 109 }, (_, i) => at(t0 + i / 72, i / 72 * 0.8)); // 0.8 rad/s (< start), ends dir.y -0.36
 const flick = (t0, a0) => Array.from({ length: 36 }, (_, i) => at(t0 + i / 72, a0 + i / 72 * 6));
 
 test('address cancelled when the club tilts up slowly, so a later flick is no swing', () => {
@@ -80,6 +80,7 @@ test('address cancelled when the club tilts up slowly, so a later flick is no sw
   const tail = still(0.8, 1.2 + 0.5 * 6, fl.at(-1).t + 1 / 72);
   const res = run(createSwingDetector(), [...addr, ...tilt, ...fl, ...tail]);
   assert.ok(res.some((r) => r.state === 'address'));
+  assert.ok(res.every((r) => r.state !== 'swinging'));
   assert.ok(res.every((r) => !r.swing));
 });
 
@@ -92,4 +93,21 @@ test('address cancelled when addressNear goes false', () => {
   const tail = still(0.8, 3, fl.at(-1).t + 1 / 72);
   const res = run(det, [...fl, ...tail]);
   assert.ok(res.every((r) => !r.swing));
+});
+
+test('a 1 s pause at the top does not end the swing before the downswing', () => {
+  const res = run(createSwingDetector(), makeSwing({ pause: 1.0, settle: 0.8 }));
+  const swings = res.filter((r) => r.swing);
+  assert.equal(swings.length, 1);
+  assert.ok(swings[0].swing.some((s) => ANGLE(s) < -1.5)); // reached the follow-through
+});
+
+test('a slow 4 s backswing starts and completes a swing', () => {
+  const samples = makeSwing({ back: 4, top: 3.0, settle: 0.8 });
+  const speeds = samples.slice(1).map((s, i) => Math.abs(ANGLE(s) - ANGLE(samples[i])) / (s.t - samples[i].t));
+  const backPeak = Math.max(...speeds.slice(0, Math.round((0.6 + 4) * 72)));
+  assert.ok(backPeak > 1.0 && backPeak < 1.5, `backswing peak ${backPeak}`);
+  const swings = run(createSwingDetector(), samples).filter((r) => r.swing);
+  assert.equal(swings.length, 1);
+  assert.ok(swings[0].swing[0].t < 2.6); // started during the backswing, before the top
 });

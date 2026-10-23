@@ -2,17 +2,19 @@
 import { angleBetween } from './geometry.js';
 
 const DEFAULTS = {
-  still: 0.5, start: 1.5, addressHold: 0.5, endHold: 0.3,
-  minSwing: 0.4, maxSwing: 5, addressNear: null,
+  still: 0.5, start: 1.0, addressHold: 0.5, endHold: 0.5,
+  minSwing: 0.4, maxSwing: 10, addressNear: null,
 };
 const MAX_NULLS = 10;
+const AWAY = 1.0; // rad from address the club must reach...
+const BACK = 0.5; // ...then come back within, before stillness can end the swing (passed impact)
 
 export function createSwingDetector(opts = {}) {
   const o = { ...DEFAULTS, ...opts };
-  let state, prev, holdStart, swing, endStart, nulls;
+  let state, prev, holdStart, swing, endStart, nulls, away, passed;
 
   function reset() {
-    state = 'idle'; prev = null; holdStart = null; swing = null; endStart = null; nulls = 0;
+    state = 'idle'; prev = null; holdStart = null; swing = null; endStart = null; nulls = 0; away = passed = false;
   }
   reset();
 
@@ -37,8 +39,12 @@ export function createSwingDetector(opts = {}) {
     if (state === 'swinging') {
       swing.push(s);
       if (s.t - swing[0].t > o.maxSwing) { reset(); return { state }; }
+      const fromAddress = angleBetween(s.dir, swing[0].dir);
+      if (fromAddress >= AWAY) away = true;
+      else if (away && fromAddress <= BACK) passed = true;
       if (speed !== null) {
-        if (speed < o.still) {
+        // A pause at the top is not the end: only stillness after impact is.
+        if (speed < o.still && passed) {
           endStart ??= before.t;
           if (s.t - endStart >= o.endHold && s.t - swing[0].t >= o.minSwing) {
             const done = swing;

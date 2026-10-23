@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { floorHit, lineOffset } from './geometry.js';
+import { floorHit, lineOffset, DOT_CAP, LINE_LENGTH } from './geometry.js';
 import { classify, summarize } from './analysis.js';
 import { createSwingDetector } from './swing.js';
 import { loadSettings, saveSettings, WIDTH_MIN, WIDTH_MAX, WIDTH_STEP } from './settings.js';
-import { createView, COLORS } from './view.js';
+import { createView, COLORS, stateColor } from './view.js';
 
 let store;
 try { store = localStorage; } catch { /* blocked: defaults, nothing persists */ }
@@ -48,20 +48,23 @@ const CALIBRATE_PROMPT = 'Point the club straight down at the floor and pull the
 const STICK_COLOR = '#e5e7eb';
 const B_BUTTON = 5;
 const A_BUTTON = 4;
+const STICK_CLICK = 3;               // thumbstick press: replay the last swing
 const PLACE_PROMPT = 'Aim at the floor and pull the trigger to place the line.';
 const ROTATE_PROMPT = 'Thumbstick left/right to rotate. Trigger to lock.';
-const LINE_LENGTH = 3;
+const READY_PROMPT = 'Address the ball to start.';
 const ROTATE_RATE = Math.PI / 3;    // 60 deg/s
 const REPLAY_SPEED = 0.25;
 
 let renderer, scene, camera, view;
 let session = null;
 let clubSrc = null;                 // input source that fired the first select
+let clubHand = null;                // its handedness, to rebind after the source is replaced
 let appState = 'calibrate';         // 'calibrate' | 'place' | 'ready'
 const axisLocal = new THREE.Vector3(0, -1, 0);
 let unsure = false;                 // latest pose.emulatedPosition, for Tasks 6/7
 let prevB = false;
 let prevA = false;
+let prevClick = false;
 let line = null;                    // {cx, cz, angle, length, width}
 let placing = 'aim';                // 'aim' | 'rotate' (within state 'place')
 let headHit = null;
@@ -78,7 +81,6 @@ let prevSample = null;
 const detector = createSwingDetector({
   addressNear: (h) => h && Math.abs(lineOffset(h, line).across) < 0.5 && Math.abs(lineOffset(h, line).along) < line.length / 2,
 });
-const stateColor = (s) => (s.state === 'skip' ? COLORS.unsure : COLORS[s.state]);
 
 function resetSwing() {
   replay = null; lastSwing = null; liveSwing = []; resultText = null; detState = 'idle'; prevSample = null;
@@ -110,9 +112,10 @@ function stepReplay(time) {
   const s = samples[replay.i];
   const { butt, head } = clubEnds(s.pos, s.dir);
   const radius = line.width / 2;
-  view.setStick(butt, head, stateColor(s), true);
-  view.setLaser('head', head, s.head, true, radius);
-  view.setLaser('butt', butt, s.butt, true, radius);
+  const color = stateColor(s.state);
+  view.setStick(butt, head, color, true);
+  view.setLaser('head', head, s.head, true, radius, color);
+  view.setLaser('butt', butt, s.butt, true, radius, color);
   return true;
 }
 
@@ -135,17 +138,23 @@ async function startSession() {
     view = createView(scene);
   }
   renderer.xr.setReferenceSpaceType('local-floor');
-  await renderer.xr.setSession(session);
+  try {
+    await renderer.xr.setSession(session);
+  } catch (err) {
+    session.end().catch(() => {});
+    session = null;
+    $('msg').textContent = 'Could not start AR: ' + err.message;
+    enterBtn.disabled = false;
+    return;
+  }
   appState = 'calibrate';
-  clubSrc = null;
+  clubSrc = clubHand = null;
   prevB = false;
   prevA = false;
+  prevClick = false;
   line = null;
   session.addEventListener('select', onSelect);
-  session.addEventListener('squeezestart', (e) => {
-    // Only when idle: a grip press must never abort a swing or cancel address.
-    if (appState === 'ready' && e.inputSource === clubSrc && detState === 'idle') startReplay(performance.now());
-  });
+  session.addEventListener('inputsourceschange', onSourcesChange);
   resetSwing();
   session.addEventListener('end', onEnd);
   form.style.display = 'none';
@@ -159,6 +168,14 @@ function onEnd() {
   enterBtn.disabled = false;
 }
 
+// A sleeping/re-paired controller comes back as a new input source: rebind it, keeping calibration.
+function onSourcesChange(e) {
+  if (clubSrc && e.removed.includes(clubSrc)) clubSrc = null;
+  if (!clubSrc && clubHand) {
+    clubSrc = e.added.find((s) => s.handedness === clubHand && s.gripSpace && !s.hand) ?? null;
+  }
+}
+
 function onSelect(e) {
   if (appState === 'place') {
     if (e.inputSource !== clubSrc || !line) return;
@@ -166,32 +183,50 @@ function onSelect(e) {
     return;
   }
   if (appState !== 'calibrate') return;
-  if (!clubSrc) clubSrc = e.inputSource;
+  if (!e.inputSource.gripSpace || e.inputSource.hand) return;
+  if (!clubSrc) { clubSrc = e.inputSource; clubHand = clubSrc.handedness; }
   if (e.inputSource !== clubSrc) return;
   const pose = e.frame.getPose(clubSrc.gripSpace, renderer.xr.getReferenceSpace());
   if (!pose) return;
   const q = pose.transform.orientation;
   const poseQuat = new THREE.Quaternion(q.x, q.y, q.z, q.w);
   axisLocal.set(0, -1, 0).applyQuaternion(poseQuat.clone().invert());
-  appState = 'place';
+  // Recalibrating keeps a placed line; A re-places it.
+  appState = line ? 'ready' : 'place';
   placing = 'aim';
-  line = null;
 }
 
+// three only requests the next XR frame after this returns, so an exception must not escape.
 function frame(time) {
+  try {
+    tick(time);
+  } catch (err) {
+    console.error(err);
+    view?.setText('Error: ' + err.message, camera);
+  }
+  renderer.render(scene, camera);
+}
+
+function tick(time) {
   const xrFrame = renderer.xr.getFrame();
   const ref = renderer.xr.getReferenceSpace();
 
-  // Button B (any controller) re-runs calibration, edge-triggered.
+  // Buttons are ignored mid-address/swing so an accidental press can't wreck it; all edge-triggered.
+  const idle = detState === 'idle';
+  // Button B (any controller) re-runs calibration.
   let b = false;
   for (const s of session.inputSources) b = b || !!s.gamepad?.buttons[B_BUTTON]?.pressed;
-  if (b && !prevB) { appState = 'calibrate'; clubSrc = null; resetSwing(); }
+  if (b && !prevB && idle) { appState = 'calibrate'; clubSrc = clubHand = null; resetSwing(); }
   prevB = b;
   // Button A re-places the line without recalibrating.
   let a = false;
   for (const s of session.inputSources) a = a || !!s.gamepad?.buttons[A_BUTTON]?.pressed;
-  if (a && !prevA && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; resetSwing(); }
+  if (a && !prevA && idle && !replay && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; resetSwing(); }
   prevA = a;
+  // Thumbstick click on the club replays the last swing (not grip: holding the controller squeezes it).
+  const click = !!clubSrc?.gamepad?.buttons[STICK_CLICK]?.pressed;
+  if (click && !prevClick && idle && appState === 'ready') startReplay(time);
+  prevClick = click;
 
   const now = performance.now();
   const dt = lastT ? Math.min((now - lastT) / 1000, 0.1) : 0;
@@ -222,7 +257,7 @@ function frame(time) {
       const club = pose ? updateClub(pose) : (hideClub(), null);
       const y = axes[3] ?? 0;
       const flick = Math.abs(y) > 0.7 ? Math.sign(y) : 0;
-      if (flick && flick !== prevFlick) {
+      if (flick && flick !== prevFlick && detState === 'idle' && !replay) {
         const w = Math.round((settings.lineWidth - flick * WIDTH_STEP) * 100) / 100; // up (negative y) = wider
         settings.lineWidth = Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, w));
         saveSettings(storage, settings);
@@ -259,11 +294,10 @@ function frame(time) {
         detState = r.state;
         prevSample = sample;
       }
-      view.setText(now < widthMsgUntil ? `Line width: ${Math.round(settings.lineWidth * 100)} cm` : resultText, camera);
+      view.setText(now < widthMsgUntil ? `Line width: ${Math.round(settings.lineWidth * 100)} cm` : resultText ?? READY_PROMPT, camera);
       break;
     }
   }
-  renderer.render(scene, camera);
 }
 
 function hideClub() {
@@ -293,8 +327,8 @@ function updateClub(pose) {
   view.setStick(butt, head, STICK_COLOR);
   // Hits are cast from pos, not the tips: a tip may sit below the floor at address.
   const radius = (settings.lineWidth ?? 0.15) / 2;
-  headHit = floorHit(pos, axis);
-  buttHit = floorHit(pos, axis.clone().negate());
+  headHit = floorHit(pos, axis, DOT_CAP);
+  buttHit = floorHit(pos, axis.clone().negate(), DOT_CAP);
   view.setLaser('head', head, headHit, false, radius);
   view.setLaser('butt', butt, buttHit, false, radius);
   return { pos, axis };

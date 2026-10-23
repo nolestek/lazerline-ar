@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 
 export const COLORS = { on: '#22c55e', off: '#ef4444', skip: '#ffd400', unsure: '#9ca3af' };
+// Sample state -> color for trails and the ghost: anything not scored reads as unsure.
+export const stateColor = (state) => (state === 'on' || state === 'off' ? COLORS[state] : COLORS.unsure);
 const RED = '#ff2a2a';
 const TRAIL_Y = 0.002;
 const BEAM_RADIUS = 0.004;
@@ -37,7 +39,7 @@ export function createView(scene) {
     placeBar(m, butt, head);
   }
 
-  function setLaser(which, from, hit, ghost = false, radius = 0.075) {
+  function setLaser(which, from, hit, ghost = false, radius = 0.075, color = RED) {
     const key = which + ghost;
     const beam = get('beam' + key, () => bar(BEAM_RADIUS, RED, ghost));
     const dot = get('dot' + key, () => {
@@ -46,6 +48,8 @@ export function createView(scene) {
       return d;
     });
     if (!from || !hit) { beam.visible = dot.visible = false; return; }
+    beam.material.color.set(color);
+    dot.material.color.set(color);
     placeBar(beam, from, { x: hit.x, y: 0, z: hit.z });
     dot.position.set(hit.x, 0.002, hit.z);
     dot.scale.setScalar(radius);
@@ -67,10 +71,10 @@ export function createView(scene) {
   }
 
   const canvas = document.createElement('canvas');
-  canvas.width = 1024; canvas.height = 256;
+  canvas.width = 1024; canvas.height = 384;
   const texture = new THREE.CanvasTexture(canvas);
   const panel = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.2, 0.3),
+    new THREE.PlaneGeometry(1.2, 0.45),
     new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: false }),
   );
   panel.renderOrder = 10;
@@ -119,7 +123,6 @@ export function createView(scene) {
   trail.frustumCulled = false;
   trail.visible = false;
   scene.add(trail);
-  const trailColor = { on: COLORS.on, off: COLORS.off };
 
   function clearTrail() {
     trail.visible = false;
@@ -130,7 +133,7 @@ export function createView(scene) {
     const c = new THREE.Color();
     for (let i = 1; i < samples.length; i++) {
       const s = samples[i];
-      c.set(trailColor[s.state] ?? COLORS.unsure);
+      c.set(stateColor(s.state));
       for (const k of ['head', 'butt']) {
         const a = samples[i - 1][k], b = s[k];
         if (!a || !b) continue;

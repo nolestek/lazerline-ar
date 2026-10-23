@@ -3,12 +3,13 @@ const ease = (u) => (1 - Math.cos(Math.PI * u)) / 2;
 
 export const ANGLE = (s) => Math.atan2(s.dir.x, -s.dir.y);
 
-export function makeSwing({ hz = 72, still = 0.6, settle = 0.5 } = {}) {
-  const total = still + 0.9 + 0.45 + settle;
+export function makeSwing({ hz = 72, still = 0.6, settle = 0.5, back = 0.9, top = 2.5, pause = 0 } = {}) {
+  const total = still + back + pause + 0.45 + settle;
   const angle = (t) => {
     if (t < still) return 0;
-    if (t < still + 0.9) return 2.5 * ease((t - still) / 0.9);
-    if (t < still + 1.35) return 2.5 - 4.5 * ease((t - still - 0.9) / 0.45);
+    if (t < still + back) return top * ease((t - still) / back);
+    if (t < still + back + pause) return top;
+    if (t < still + back + pause + 0.45) return top - (top + 2) * ease((t - still - back - pause) / 0.45);
     return -2.0;
   };
   const out = [];

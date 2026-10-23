@@ -1,6 +1,8 @@
 // Pure geometry helpers. No three.js imports, so Node can test them.
 
 const MAX_HORIZONTAL_DIST = 4;
+export const LINE_LENGTH = 3;
+export const DOT_CAP = 1.0; // m horizontal from the controller; keeps dots inside the 3 m line on an in-plane swing
 
 /**
  * Where a ray hits the floor (plane y = 0), or null.
