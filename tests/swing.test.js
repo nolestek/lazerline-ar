@@ -55,8 +55,41 @@ test('addressNear false blocks address', () => {
   assert.ok(res.every((r) => r.state !== 'address'));
 });
 
-test('duplicate timestamps do not break speed', () => {
-  const s = still(1, 0);
-  const res = run(createSwingDetector(), [s[0], { ...s[0] }, ...s.slice(1)]);
-  assert.ok(res.every((r) => r.state !== 'swinging'));
+test('duplicate timestamps are ignored and do not shift detection', () => {
+  const plain = makeSwing();
+  const dupAt = new Set([20, 70]); // mid-address-hold and mid-swing
+  const dup = plain.flatMap((s, i) => (dupAt.has(i) ? [s, { ...s }] : [s]));
+  const keep = dup.map((s, i) => i === 0 || dup[i - 1].t !== s.t);
+  const states = (samples) => run(createSwingDetector(), samples);
+  const a = states(plain);
+  const b = states(dup).filter((_, i) => keep[i]);
+  assert.deepEqual(b.map((r) => r.state), a.map((r) => r.state));
+  assert.equal(b.filter((r) => r.swing).length, 1);
+  assert.equal(b.findIndex((r) => r.state === 'address'), a.findIndex((r) => r.state === 'address'));
+  assert.equal(b.findIndex((r) => r.state === 'swinging'), a.findIndex((r) => r.state === 'swinging'));
+});
+
+const slowTilt = (t0) => Array.from({ length: 73 }, (_, i) => at(t0 + i / 72, i / 72 * 1.2)); // 1 rad/s, ends dir.y -0.36
+const flick = (t0, a0) => Array.from({ length: 36 }, (_, i) => at(t0 + i / 72, a0 + i / 72 * 6));
+
+test('address cancelled when the club tilts up slowly, so a later flick is no swing', () => {
+  const addr = still(0.8, 0);
+  const tilt = slowTilt(0.8);
+  const tEnd = tilt.at(-1).t + 1 / 72;
+  const fl = flick(tEnd, 1.2);
+  const tail = still(0.8, 1.2 + 0.5 * 6, fl.at(-1).t + 1 / 72);
+  const res = run(createSwingDetector(), [...addr, ...tilt, ...fl, ...tail]);
+  assert.ok(res.some((r) => r.state === 'address'));
+  assert.ok(res.every((r) => !r.swing));
+});
+
+test('address cancelled when addressNear goes false', () => {
+  let near = true;
+  const det = createSwingDetector({ addressNear: () => near });
+  run(det, still(0.8, 0));
+  near = false;
+  const fl = flick(0.8, 0);
+  const tail = still(0.8, 3, fl.at(-1).t + 1 / 72);
+  const res = run(det, [...fl, ...tail]);
+  assert.ok(res.every((r) => !r.swing));
 });

@@ -51,6 +51,11 @@ export function createSwingDetector(opts = {}) {
     }
 
     if (state === 'address') {
+      // Losing the pose (not stillness: a slow takeaway keeps address) cancels it.
+      if (s.dir.y >= -0.5 || (o.addressNear && !o.addressNear(s.head))) {
+        state = 'idle'; holdStart = null;
+        return { state };
+      }
       if (speed !== null && speed > o.start) {
         state = 'swinging'; swing = [before, s]; endStart = null;
       }
