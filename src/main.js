@@ -130,6 +130,7 @@ function frame() {
 }
 
 function hideClub() {
+  view.setStick(null);
   view.setLaser('head', null, null);
   view.setLaser('butt', null, null);
 }

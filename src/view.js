@@ -29,6 +29,7 @@ export function createView(scene) {
     new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 8), material(color, ghost));
 
   function setStick(butt, head, color, ghost = false) {
+    if (!butt || !head) { if (cache['stick' + ghost]) cache['stick' + ghost].visible = false; return; }
     const m = get('stick' + ghost, () => bar(0.012, color, ghost));
     m.material.color.set(color);
     placeBar(m, butt, head);
