@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { floorHit, nearLine, LINE_LENGTH } from './geometry.js';
 import { classify, summarize } from './analysis.js';
 import { createSwingDetector } from './swing.js';
+import { buildHoop, classifyHoop, nearHoop } from './hoop.js';
 import { loadSettings, saveSettings, WIDTH_MIN, WIDTH_MAX, WIDTH_STEP } from './settings.js';
 import { createView, COLORS } from './view.js';
 
@@ -17,6 +18,7 @@ const enterBtn = $('enter');
 const settings = loadSettings(storage);
 
 form.elements.mode.value = settings.mode;
+form.elements.drill.value = settings.drill;
 // Prefill the select only if the saved length is one of the presets.
 $('clubLength').value = String(settings.clubLength);
 $('gripLength').value = settings.gripLength;
@@ -25,6 +27,7 @@ function syncForm() {
   const mode = form.elements.mode.value;
   $('gripRow').style.display = mode === 'adapter' ? '' : 'none';
   settings.mode = mode;
+  settings.drill = form.elements.drill.value;
   settings.clubLength = Number($('clubLength').value) || settings.clubLength;
   const grip = Number($('gripLength').value);
   if (Number.isFinite(grip) && grip >= 0 && grip <= 0.8) settings.gripLength = grip;
@@ -52,6 +55,14 @@ const PLACE_PROMPT = 'Aim at the floor and pull the trigger to place the line.';
 const ROTATE_PROMPT = 'Thumbstick left/right to rotate. Trigger to lock.';
 const READY_PROMPT = 'Address the ball to start.\nThumbstick up/down: line width.';
 const TUNE_PROMPT = 'Thumbstick to tilt the stick onto your grip. Trigger when it lines up.';
+const HOOP_AIM_PROMPT = 'Take your address and pull the trigger.';
+const HOOP_CONFIRM_PROMPT = 'Pull the trigger to use this hoop. A to redo.';
+const HOOP_READY_PROMPT = 'Address the ball to start.\nThumbstick up/down: tolerance.';
+const HOLD_SECONDS = 3;
+const HOLD_MAX_SPEED = 0.3;         // rad/s
+const HOLD_MAX_DRIFT = 0.03;        // m of clubhead drift from where the hold began
+const HOOP_ARM = 0.6;               // m added to club length for the hoop's (visual) radius
+const BUZZ_GAP = 250;               // ms between haptic pulses
 const ROTATE_RATE = Math.PI / 3;    // 60 deg/s
 const TUNE_RATE = Math.PI / 18;     // 10 deg/s at full stick
 
@@ -59,7 +70,7 @@ let renderer, scene, camera, view;
 let session = null;
 let clubSrc = null;                 // input source that fired the first select
 let clubHand = null;                // its handedness, to rebind after the source is replaced
-let appState = 'calibrate';         // 'calibrate' | 'tune' | 'place' | 'ready'
+let appState = 'calibrate';         // 'calibrate' | 'tune' | 'place' | 'hoopAim' | 'hoopHold' | 'hoopConfirm' | 'ready'
 const axisLocal = new THREE.Vector3(0, -1, 0);
 let unsure = false;                 // latest pose.emulatedPosition, for Tasks 6/7
 let prevB = false;
@@ -80,10 +91,20 @@ let prevSample = null;
 const detector = createSwingDetector({
   addressNear: (h) => nearLine(h, line),
 });
+let hoop = null;                    // Hoop drill target, fixed in the world once built
+let hoopAccepted = false;
+let hold = null;                    // {start, tip0, prevAxis} while counting down a still address
+let prevOn = true;                  // last scored hoop state, for the on -> off buzz
+let lastBuzz = 0;
+const hoopDetector = createSwingDetector({
+  addressNear: (h) => nearHoop(h, hoop),
+});
 
 function resetSwing() {
   liveSwing = []; resultText = null; detState = 'idle'; prevSample = null; lineColor = COLORS.skip;
   detector.reset();
+  hoopDetector.reset();
+  prevOn = true;
   view?.clearTrail();
 }
 
@@ -121,6 +142,8 @@ async function startSession() {
   prevA = false;
   line = null;
   lineLocked = false;
+  hoop = null;
+  hoopAccepted = false;
   session.addEventListener('select', onSelect);
   session.addEventListener('inputsourceschange', onSourcesChange);
   resetSwing();
@@ -147,9 +170,15 @@ function onSourcesChange(e) {
 function onSelect(e) {
   if (appState === 'tune') {
     if (e.inputSource !== clubSrc) return;
-    // Recalibrating keeps a placed line; A re-places it.
-    appState = lineLocked ? 'ready' : 'place';
+    // Recalibrating keeps a placed line or accepted hoop; A redoes it.
+    if (settings.drill === 'hoop') appState = hoopAccepted ? 'ready' : 'hoopAim';
+    else appState = lineLocked ? 'ready' : 'place';
     placing = 'aim';
+    return;
+  }
+  if (appState === 'hoopAim' || appState === 'hoopConfirm') {
+    if (e.inputSource !== clubSrc) return;
+    if (appState === 'hoopAim') { appState = 'hoopHold'; hold = null; } else { hoopAccepted = true; appState = 'ready'; }
     return;
   }
   if (appState === 'place') {
@@ -191,10 +220,14 @@ function tick(time) {
   for (const s of session.inputSources) b = b || !!s.gamepad?.buttons[B_BUTTON]?.pressed;
   if (b && !prevB && idle) { appState = 'calibrate'; clubSrc = clubHand = null; resetSwing(); }
   prevB = b;
-  // Button A re-places the line without recalibrating.
+  // Button A re-places the line / redoes the hoop without recalibrating.
   let a = false;
   for (const s of session.inputSources) a = a || !!s.gamepad?.buttons[A_BUTTON]?.pressed;
-  if (a && !prevA && idle && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; lineLocked = false; resetSwing(); }
+  if (a && !prevA && idle) {
+    if (settings.drill === 'hoop' && ['ready', 'hoopAim', 'hoopHold', 'hoopConfirm'].includes(appState)) {
+      hoop = null; hoopAccepted = false; appState = 'hoopAim'; resetSwing();
+    } else if (appState === 'ready' || appState === 'place') { appState = 'place'; placing = 'aim'; lineLocked = false; resetSwing(); }
+  }
   prevA = a;
 
   const now = performance.now();
@@ -204,6 +237,9 @@ function tick(time) {
 
   const pose = clubSrc && xrFrame ? xrFrame.getPose(clubSrc.gripSpace, ref) : null;
   unsure = pose ? pose.emulatedPosition : false;
+  const hoopDrill = settings.drill === 'hoop';
+  // An existing hoop stays visible as a reference outside 'ready' (which colors it).
+  view.setHoop(hoopDrill ? hoop : null, COLORS.skip);
 
   switch (appState) {
     case 'calibrate':
@@ -224,7 +260,7 @@ function tick(time) {
           .applyAxisAngle(away, -x * TUNE_RATE * dt)
           .applyAxisAngle(right, -y * TUNE_RATE * dt);
         axisLocal.copy(axis.applyQuaternion(quat.invert())).normalize();
-        updateClub(pose);
+        updateClub(pose, !hoopDrill);
       } else hideClub();
       view.setText(TUNE_PROMPT, camera);
       view.setLine(line, COLORS.skip);
@@ -240,8 +276,32 @@ function tick(time) {
       }
       view.setLine(line, COLORS.skip);
       break;
+    case 'hoopAim':
+    case 'hoopConfirm':
+      if (pose) updateClub(pose, false); else hideClub();
+      view.setText(appState === 'hoopAim' ? HOOP_AIM_PROMPT : HOOP_CONFIRM_PROMPT, camera);
+      break;
+    case 'hoopHold': {
+      if (!pose) { hold = null; hideClub(); view.setText(`Hold still… ${HOLD_SECONDS}`, camera); break; }
+      const club = updateClub(pose, false);
+      if (!hold) hold = { start: now, tip0: club.head.clone(), prevAxis: club.axis.clone() };
+      else {
+        const speed = dt > 0 ? club.axis.angleTo(hold.prevAxis) / dt : 0;
+        hold.prevAxis = club.axis.clone();
+        if (speed >= HOLD_MAX_SPEED || club.head.distanceTo(hold.tip0) > HOLD_MAX_DRIFT) { hold.start = now; hold.tip0 = club.head.clone(); }
+      }
+      const left = HOLD_SECONDS - (now - hold.start) / 1000;
+      if (left <= 0) {
+        const right = new THREE.Vector3(1, 0, 0).transformDirection(camera.matrixWorld);
+        const { x, y, z } = club.head;
+        hoop = buildHoop({ x, y, z }, { x: club.axis.x, y: club.axis.y, z: club.axis.z }, settings.clubLength + HOOP_ARM, { x: right.x, y: right.y, z: right.z });
+        appState = 'hoopConfirm';
+      }
+      view.setText(`Hold still… ${Math.max(1, Math.ceil(left))}`, camera);
+      break;
+    }
     case 'ready': {
-      const club = pose ? updateClub(pose) : (hideClub(), null);
+      const club = pose ? updateClub(pose, !hoopDrill) : (hideClub(), null);
       const y = axes[3] ?? 0;
       const flick = Math.abs(y) > 0.7 ? Math.sign(y) : 0;
       if (flick && flick !== prevFlick && detState === 'idle') {
@@ -251,10 +311,21 @@ function tick(time) {
         widthMsgUntil = now + 1500;
       }
       prevFlick = flick;
-      line.width = settings.lineWidth;
-      const state = classify(headHit, buttHit, unsure, line);
-      if (state !== 'skip') lineColor = COLORS[state];
-      view.setLine(line, unsure ? COLORS.unsure : lineColor);
+      let state;
+      if (hoopDrill) {
+        state = classifyHoop(club && club.head, unsure, hoop, settings.lineWidth);
+        view.setHoop(hoop, unsure ? COLORS.unsure : COLORS[state]);
+        if (detState === 'swinging' && prevOn && state === 'off' && now - lastBuzz >= BUZZ_GAP) {
+          clubSrc?.gamepad?.hapticActuators?.[0]?.pulse?.(0.6, 80);
+          lastBuzz = now;
+        }
+        if (state !== 'skip') prevOn = state === 'on';
+      } else {
+        line.width = settings.lineWidth;
+        state = classify(headHit, buttHit, unsure, line);
+        if (state !== 'skip') lineColor = COLORS[state];
+        view.setLine(line, unsure ? COLORS.unsure : lineColor);
+      }
 
       // Plain copies: updateClub's vectors are not reused, but samples must never alias live state.
       const sample = club && {
@@ -262,7 +333,13 @@ function tick(time) {
         dir: { x: club.axis.x, y: club.axis.y, z: club.axis.z }, unsure,
         head: headHit && { x: headHit.x, z: headHit.z }, butt: buttHit && { x: buttHit.x, z: buttHit.z }, state,
       };
-      const r = detector.update(sample);
+      // Hoop drill: head is the virtual clubhead's floor position (never null while tracked), tip its 3D path.
+      if (sample && hoopDrill) {
+        sample.head = { x: club.head.x, z: club.head.z };
+        sample.butt = null;
+        sample.tip = { x: club.head.x, y: club.head.y, z: club.head.z };
+      }
+      const r = (hoopDrill ? hoopDetector : detector).update(sample);
       if (r.state === 'address' && detState !== 'address') {
         view.clearTrail(); resultText = null; liveSwing = [];
       }
@@ -279,7 +356,8 @@ function tick(time) {
       }
       detState = r.state;
       prevSample = sample;
-      view.setText(now < widthMsgUntil ? `Line width: ${Math.round(settings.lineWidth * 100)} cm` : resultText ?? READY_PROMPT, camera);
+      const widthLabel = hoopDrill ? 'Tolerance' : 'Line width';
+      view.setText(now < widthMsgUntil ? `${widthLabel}: ${Math.round(settings.lineWidth * 100)} cm` : resultText ?? (hoopDrill ? HOOP_READY_PROMPT : READY_PROMPT), camera);
       break;
     }
   }
@@ -303,7 +381,7 @@ function clubEnds(p, dir) {
   return { butt, head };
 }
 
-function updateClub(pose) {
+function updateClub(pose, lasers = true) {
   const p = pose.transform.position;
   const q = pose.transform.orientation;
   const pos = new THREE.Vector3(p.x, p.y, p.z);
@@ -312,9 +390,9 @@ function updateClub(pose) {
   view.setStick(butt, head, STICK_COLOR);
   // Hits are cast from pos, not the tips: a tip may sit below the floor at address.
   const radius = settings.lineWidth / 4; // dot half the line's width, so it visibly sits inside the line
-  headHit = floorHit(pos, axis);
-  buttHit = floorHit(pos, axis.clone().negate());
+  headHit = lasers ? floorHit(pos, axis) : null;
+  buttHit = lasers ? floorHit(pos, axis.clone().negate()) : null;
   view.setLaser('head', head, headHit, radius);
   view.setLaser('butt', butt, buttHit, radius);
-  return { pos, axis };
+  return { pos, axis, head };
 }
