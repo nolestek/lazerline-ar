@@ -83,7 +83,8 @@ Through a normal swing this naturally gives: the clubhead dot during takeaway, t
 
 Automatic, no buttons:
 - **Address:** the club is roughly still and pointing down near the line for a short moment.
-- **Swing start:** the club starts moving after address.
+- **Swing start:** the club turns faster than 1 rad/s, or turns more than ~9° (0.15 rad) away from its address direction at any speed — so slow-motion practice swings start too.
+- **Waggles and lifts:** a start that settles back at address is dropped (stay at address); one that sits still 3 s without passing impact is abandoned. Neither produces a result.
 - **Swing end:** the club settles after the follow-through.
 - Builder tunes the thresholds (speed, stillness duration) on real hardware.
 

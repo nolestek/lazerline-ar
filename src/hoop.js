@@ -1,7 +1,7 @@
 // Swing-plane hoop math. No three.js imports, so Node can test it.
 
 const UP = { x: 0, y: 1, z: 0 };
-const ADDRESS_ZONE = 0.3; // m, horizontal radius around the address clubhead
+const ADDRESS_ZONE = 0.5; // m around the address clubhead: a slow takeaway must turn ~9° before leaving it
 
 const add = (a, b, k = 1) => ({ x: a.x + b.x * k, y: a.y + b.y * k, z: a.z + b.z * k });
 const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;

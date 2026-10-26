@@ -55,7 +55,7 @@ Per frame in ready state:
 
 ## Swing detection in Hoop drill
 
-Same detector. Its `addressNear(s.head)` predicate is fed the floor hit of the clubhead laser in Line drill. In Hoop drill, samples carry `head` = the **virtual clubhead's horizontal position** `{x, z}` (never null while tracked), `butt = null`, plus `tip = {x, y, z}` (3D virtual clubhead, for the trail). The predicate accepts `head` within 0.3 m horizontally of `head₀` — a pure, tested function like `nearLine`.
+Same detector. Its `addressNear(s.head)` predicate is fed the floor hit of the clubhead laser in Line drill. In Hoop drill, samples carry `head` = the **virtual clubhead's horizontal position** `{x, z}` (never null while tracked), `butt = null`, plus `tip = {x, y, z}` (3D virtual clubhead, for the trail). The predicate accepts `head` within 0.5 m horizontally of `head₀` (widened from 0.3 m so slow takeaways start before leaving it) — a pure, tested function like `nearLine`.
 
 ## Visuals in Hoop drill
 

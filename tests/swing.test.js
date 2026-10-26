@@ -77,11 +77,12 @@ test('address cancelled when the club tilts up slowly, so a later flick is no sw
   const tilt = slowTilt(0.8);
   const tEnd = tilt.at(-1).t + 1 / 72;
   const fl = flick(tEnd, 1.2);
-  const tail = still(0.8, 1.2 + 0.5 * 6, fl.at(-1).t + 1 / 72);
+  const tail = still(3.5, 1.2 + 0.5 * 6, fl.at(-1).t + 1 / 72);
   const res = run(createSwingDetector(), [...addr, ...tilt, ...fl, ...tail]);
   assert.ok(res.some((r) => r.state === 'address'));
-  assert.ok(res.every((r) => r.state !== 'swinging'));
+  // A slow lift looks like a slow takeaway, so it may start a swing, but never yields one and gives up when it stalls.
   assert.ok(res.every((r) => !r.swing));
+  assert.equal(res.at(-1).state, 'idle');
 });
 
 test('address cancelled when addressNear goes false', () => {
@@ -110,4 +111,24 @@ test('a slow 4 s backswing starts and completes a swing', () => {
   const swings = run(createSwingDetector(), samples).filter((r) => r.swing);
   assert.equal(swings.length, 1);
   assert.ok(swings[0].swing[0].t < 2.6); // started during the backswing, before the top
+});
+
+test('a slow-motion swing that never reaches the speed gate is still detected', () => {
+  const samples = makeSwing({ back: 6, down: 5, settle: 0.8 });
+  const speeds = samples.slice(1).map((x, i) => Math.abs(ANGLE(x) - ANGLE(samples[i])) / (x.t - samples[i].t));
+  assert.ok(Math.max(...speeds.slice(0, Math.round((0.6 + 6) * 72))) < 1.0); // backswing never hits 1 rad/s
+  const swings = run(createSwingDetector(), samples).filter((r) => r.swing);
+  assert.equal(swings.length, 1);
+  assert.ok(swings[0].swing.some((x) => ANGLE(x) < -1.5)); // includes the follow-through
+});
+
+test('a waggle that returns to address is dropped, not a stuck swing', () => {
+  const addr = still(0.8, 0);
+  const t0 = addr.at(-1).t + 1 / 72;
+  const wag = Array.from({ length: 72 }, (_, i) => at(t0 + i / 72, 0.4 * Math.sin((Math.PI * i) / 72)));
+  const back = still(1.5, 0, wag.at(-1).t + 1 / 72);
+  const res = run(createSwingDetector(), [...addr, ...wag, ...back]);
+  assert.ok(res.some((r) => r.state === 'swinging'));
+  assert.ok(res.every((r) => !r.swing));
+  assert.equal(res.at(-1).state, 'address'); // ready for the real swing
 });

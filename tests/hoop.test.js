@@ -48,10 +48,10 @@ test('classifyHoop', () => {
   assert.equal(classifyHoop(null, false, hoop, 0.1), 'skip');
 });
 
-test('nearHoop is a 0.3 m horizontal zone around the address clubhead', () => {
+test('nearHoop is a 0.5 m horizontal zone around the address clubhead', () => {
   assert.equal(nearHoop(null, hoop), false);
-  assert.equal(nearHoop({ x: 0.2, z: 0 }, hoop), true);
-  assert.equal(nearHoop({ x: 0.4, z: 0 }, hoop), false);
+  assert.equal(nearHoop({ x: 0.45, z: 0 }, hoop), true);
+  assert.equal(nearHoop({ x: 0.6, z: 0 }, hoop), false);
 });
 
 // A rigid club swung about an axis through the hoop center: tip(θ) = center + R(−up·cosθ + t·sinθ) rotated about `spin`.
