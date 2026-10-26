@@ -1,7 +1,7 @@
 // Persisted user settings. No three.js imports, so Node can test it.
 // Storage is injected so tests can pass a fake; every access is guarded.
 
-export const DEFAULTS = { mode: 'adapter', clubLength: 0.95, gripLength: 0.4, lineWidth: 0.10 };
+export const DEFAULTS = { mode: 'adapter', clubLength: 0.95, gripLength: 0.4, lineWidth: 0.10, drill: 'line' };
 export const WIDTH_MIN = 0.02;
 export const WIDTH_MAX = 0.30;
 export const WIDTH_STEP = 0.01;
@@ -27,6 +27,7 @@ export function loadSettings(storage) {
     clubLength: inRange(o.clubLength, 0.5, 1.4, DEFAULTS.clubLength),
     gripLength: inRange(o.gripLength, 0, 0.8, DEFAULTS.gripLength),
     lineWidth: width,
+    drill: o.drill === 'line' || o.drill === 'hoop' ? o.drill : DEFAULTS.drill,
   };
 }
 

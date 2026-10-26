@@ -17,7 +17,11 @@ test('bad fields fall back individually', () => {
 });
 test('round trip', () => {
   const st = mem();
-  const s = { mode: 'controller', clubLength: 1.15, gripLength: 0.3, lineWidth: 0.05 };
+  const s = { mode: 'controller', clubLength: 1.15, gripLength: 0.3, lineWidth: 0.05, drill: 'hoop' };
   saveSettings(st, s);
   assert.deepEqual(loadSettings(st), s);
+});
+test('drill defaults to line and rejects unknown values', () => {
+  assert.equal(DEFAULTS.drill, 'line');
+  assert.equal(loadSettings(mem({ 'lazerline.settings.v2': JSON.stringify({ drill: 'circle' }) })).drill, 'line');
 });
