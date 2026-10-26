@@ -52,14 +52,16 @@ const STICK_CLICK = 3;               // thumbstick press: replay the last swing
 const PLACE_PROMPT = 'Aim at the floor and pull the trigger to place the line.';
 const ROTATE_PROMPT = 'Thumbstick left/right to rotate. Trigger to lock.';
 const READY_PROMPT = 'Address the ball to start.';
+const TUNE_PROMPT = 'Thumbstick to tilt the stick onto your grip. Trigger when it lines up.';
 const ROTATE_RATE = Math.PI / 3;    // 60 deg/s
+const TUNE_RATE = Math.PI / 18;     // 10 deg/s at full stick
 const REPLAY_SPEED = 0.25;
 
 let renderer, scene, camera, view;
 let session = null;
 let clubSrc = null;                 // input source that fired the first select
 let clubHand = null;                // its handedness, to rebind after the source is replaced
-let appState = 'calibrate';         // 'calibrate' | 'place' | 'ready'
+let appState = 'calibrate';         // 'calibrate' | 'tune' | 'place' | 'ready'
 const axisLocal = new THREE.Vector3(0, -1, 0);
 let unsure = false;                 // latest pose.emulatedPosition, for Tasks 6/7
 let prevB = false;
@@ -179,6 +181,13 @@ function onSourcesChange(e) {
 }
 
 function onSelect(e) {
+  if (appState === 'tune') {
+    if (e.inputSource !== clubSrc) return;
+    // Recalibrating keeps a placed line; A re-places it.
+    appState = lineLocked ? 'ready' : 'place';
+    placing = 'aim';
+    return;
+  }
   if (appState === 'place') {
     if (e.inputSource !== clubSrc || !line) return;
     if (placing === 'aim') placing = 'rotate'; else { appState = 'ready'; lineLocked = true; }
@@ -193,9 +202,7 @@ function onSelect(e) {
   const q = pose.transform.orientation;
   const poseQuat = new THREE.Quaternion(q.x, q.y, q.z, q.w);
   axisLocal.set(0, -1, 0).applyQuaternion(poseQuat.clone().invert());
-  // Recalibrating keeps a placed line; A re-places it.
-  appState = lineLocked ? 'ready' : 'place';
-  placing = 'aim';
+  appState = 'tune'; // nobody holds a club perfectly vertical; let them fix the tilt by eye
 }
 
 // three only requests the next XR frame after this returns, so an exception must not escape.
@@ -243,6 +250,24 @@ function tick(time) {
       view.setText(CALIBRATE_PROMPT, camera);
       hideClub();
       view.setLine(null);
+      break;
+    case 'tune':
+      if (pose) {
+        // Tilt in the viewer's frame: stick right swings the clubhead end right, up swings it away.
+        const q = pose.transform.orientation;
+        const quat = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+        const right = new THREE.Vector3(1, 0, 0).transformDirection(camera.matrixWorld).setY(0).normalize();
+        const away = new THREE.Vector3(0, 0, -1).transformDirection(camera.matrixWorld).setY(0).normalize();
+        const x = Math.abs(axes[2] ?? 0) > 0.1 ? axes[2] : 0;
+        const y = Math.abs(axes[3] ?? 0) > 0.1 ? axes[3] : 0;
+        const axis = axisLocal.clone().applyQuaternion(quat)
+          .applyAxisAngle(away, -x * TUNE_RATE * dt)
+          .applyAxisAngle(right, -y * TUNE_RATE * dt);
+        axisLocal.copy(axis.applyQuaternion(quat.invert())).normalize();
+        updateClub(pose);
+      } else hideClub();
+      view.setText(TUNE_PROMPT, camera);
+      view.setLine(line, COLORS.skip);
       break;
     case 'place':
       if (pose) updateClub(pose); else hideClub();

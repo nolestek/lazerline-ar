@@ -53,6 +53,8 @@ Twist around the shaft does not matter, since the lasers only use the axis direc
 
 Known limit (decided, revisit after testing): calibration captures direction only, not position. The angled holder puts the controller a few cm off the real shaft axis, so the dots may sit a few cm off from where the real shaft points. Fine at wide line widths. If it matters at narrow widths, add a second calibration step later (e.g. touch the clubhead end to the floor). Calibration runs on every session start and can be redone from a button.
 
+Fine-tune (added after first headset test): nobody holds the club perfectly vertical, so the virtual stick can come out tilted relative to the real grip. Right after the trigger, the golfer nudges the stick's tilt with the thumbstick (in their own view: right/left and toward/away) until it lines up with the real grip in passthrough, then pulls the trigger again.
+
 Mode differences (both use the same calibration and the same infinite laser line, so scoring is identical; only where the stick is drawn differs):
 - **Club adapter:** the user's VR club is a grip with the controller holder just below it, roughly halfway down where a normal shaft would be. The virtual stick extends *both ways* from the controller: up the shaft to the butt end of the grip (a short, adjustable "grip length", default ~0.4 m, builder's call), and down to where the clubhead would be (club length minus grip length). The butt-end laser starts at the top of the grip and the clubhead laser at the virtual clubhead.
 - **Controller only:** the hand holds the controller, so the controller is the grip. The butt end sits at the controller, and the virtual stick extends a full club length toward the clubhead.
