@@ -67,6 +67,23 @@ export function createView(scene) {
     m.visible = true;
   }
 
+  function setHoop(hoop, color) {
+    const m = get('hoop', () => new THREE.Mesh(new THREE.BufferGeometry(), material(color)));
+    if (!hoop) { m.visible = false; return; }
+    if (m.userData.radius !== hoop.radius) {
+      m.geometry.dispose();
+      m.geometry = new THREE.TorusGeometry(hoop.radius, 0.01, 8, 128);
+      m.userData.radius = hoop.radius;
+    }
+    m.material.color.set(color);
+    m.material.opacity = 0.8;
+    // Torus lies in its local XY plane: map X -> target line, Y -> in-plane up, Z -> plane normal.
+    const v = (p) => new THREE.Vector3(p.x, p.y, p.z);
+    m.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(v(hoop.t), v(hoop.up), v(hoop.n)));
+    m.position.copy(v(hoop.center));
+    m.visible = true;
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = 1024; canvas.height = 384;
   const texture = new THREE.CanvasTexture(canvas);
@@ -131,6 +148,12 @@ export function createView(scene) {
     for (let i = 1; i < samples.length; i++) {
       const s = samples[i];
       c.set(stateColor(s.state));
+      // Hoop drill samples carry the clubhead's 3D path; Line drill draws the floor dots.
+      if (s.tip) {
+        const a = samples[i - 1].tip;
+        if (a) { pos.push(a.x, a.y, a.z, s.tip.x, s.tip.y, s.tip.z); col.push(c.r, c.g, c.b, c.r, c.g, c.b); }
+        continue;
+      }
       for (const k of ['head', 'butt']) {
         const a = samples[i - 1][k], b = s[k];
         if (!a || !b) continue;
@@ -145,5 +168,5 @@ export function createView(scene) {
     trail.visible = pos.length > 0;
   }
 
-  return { setStick, setLaser, setLine, setText, setTrail, clearTrail };
+  return { setStick, setLaser, setLine, setHoop, setText, setTrail, clearTrail };
 }
