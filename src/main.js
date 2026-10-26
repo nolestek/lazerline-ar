@@ -59,7 +59,6 @@ const HOOP_AIM_PROMPT = 'Take your address and pull the trigger.';
 const HOOP_CONFIRM_PROMPT = 'Pull the trigger to use this hoop. A to redo.';
 const HOOP_READY_PROMPT = 'Address the ball to start.\nThumbstick up/down: tolerance.';
 const HOLD_SECONDS = 3;
-const HOLD_MAX_SPEED = 0.3;         // rad/s
 const HOLD_MAX_DRIFT = 0.03;        // m of clubhead drift from where the hold began
 const HOOP_ARM = 0.6;               // m added to club length for the hoop's (visual) radius
 const BUZZ_GAP = 250;               // ms between haptic pulses
@@ -93,7 +92,7 @@ const detector = createSwingDetector({
 });
 let hoop = null;                    // Hoop drill target, fixed in the world once built
 let hoopAccepted = false;
-let hold = null;                    // {start, tip0, prevAxis} while counting down a still address
+let hold = null;                    // {start, tip0} while counting down a still address
 let prevOn = true;                  // last scored hoop state, for the on -> off buzz
 let lastBuzz = 0;
 const hoopDetector = createSwingDetector({
@@ -284,12 +283,10 @@ function tick(time) {
     case 'hoopHold': {
       if (!pose) { hold = null; hideClub(); view.setText(`Hold still… ${HOLD_SECONDS}`, camera); break; }
       const club = updateClub(pose, false);
-      if (!hold) hold = { start: now, tip0: club.head.clone(), prevAxis: club.axis.clone() };
-      else {
-        const speed = dt > 0 ? club.axis.angleTo(hold.prevAxis) / dt : 0;
-        hold.prevAxis = club.axis.clone();
-        if (speed >= HOLD_MAX_SPEED || club.head.distanceTo(hold.tip0) > HOLD_MAX_DRIFT) { hold.start = now; hold.tip0 = club.head.clone(); }
-      }
+      // An estimated pose looks perfectly still, and a level or raised shaft has no plane to build: neither counts.
+      if (unsure || club.axis.y >= -0.5) { hold = null; view.setText(`Hold still… ${HOLD_SECONDS}`, camera); break; }
+      // Drift alone: 3 cm at the clubhead already catches ~2° of rotation, without per-frame speed noise.
+      if (!hold || club.head.distanceTo(hold.tip0) > HOLD_MAX_DRIFT) hold = { start: now, tip0: club.head.clone() };
       const left = HOLD_SECONDS - (now - hold.start) / 1000;
       if (left <= 0) {
         const right = new THREE.Vector3(1, 0, 0).transformDirection(camera.matrixWorld);
