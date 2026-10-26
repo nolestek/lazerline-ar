@@ -3,7 +3,7 @@ import { floorHit, nearLine, LINE_LENGTH } from './geometry.js';
 import { classify, summarize } from './analysis.js';
 import { createSwingDetector } from './swing.js';
 import { loadSettings, saveSettings, WIDTH_MIN, WIDTH_MAX, WIDTH_STEP } from './settings.js';
-import { createView, COLORS, stateColor } from './view.js';
+import { createView, COLORS } from './view.js';
 
 let store;
 try { store = localStorage; } catch { /* blocked: defaults, nothing persists */ }
@@ -48,14 +48,12 @@ const CALIBRATE_PROMPT = 'Point the club straight down at the floor and pull the
 const STICK_COLOR = '#e5e7eb';
 const B_BUTTON = 5;
 const A_BUTTON = 4;
-const STICK_CLICK = 3;               // thumbstick press: replay the last swing
 const PLACE_PROMPT = 'Aim at the floor and pull the trigger to place the line.';
 const ROTATE_PROMPT = 'Thumbstick left/right to rotate. Trigger to lock.';
 const READY_PROMPT = 'Address the ball to start.';
 const TUNE_PROMPT = 'Thumbstick to tilt the stick onto your grip. Trigger when it lines up.';
 const ROTATE_RATE = Math.PI / 3;    // 60 deg/s
 const TUNE_RATE = Math.PI / 18;     // 10 deg/s at full stick
-const REPLAY_SPEED = 0.25;
 
 let renderer, scene, camera, view;
 let session = null;
@@ -66,8 +64,7 @@ const axisLocal = new THREE.Vector3(0, -1, 0);
 let unsure = false;                 // latest pose.emulatedPosition, for Tasks 6/7
 let prevB = false;
 let prevA = false;
-let prevClick = false;
-let line = null;                    // {cx, cz, angle, length, width}
+let line = null;                   // {cx, cz, angle, length, width}
 let lineLocked = false;             // true once the trigger locked the line
 let placing = 'aim';                // 'aim' | 'rotate' (within state 'place')
 let headHit = null;
@@ -76,9 +73,8 @@ let lastT = 0;
 let prevFlick = 0;
 let widthMsgUntil = 0;
 let liveSwing = [];                 // in-progress samples, shown as the live trail
-let lastSwing = null;               // last completed swing, for replay
-let replay = null;                  // {samples, start (ms), i} while the ghost plays
 let resultText = null;
+let lineColor = COLORS.skip;        // held through unscored moments so the line doesn't flash yellow mid-swing
 let detState = 'idle';
 let prevSample = null;
 const detector = createSwingDetector({
@@ -86,40 +82,9 @@ const detector = createSwingDetector({
 });
 
 function resetSwing() {
-  replay = null; lastSwing = null; liveSwing = []; resultText = null; detState = 'idle'; prevSample = null;
+  liveSwing = []; resultText = null; detState = 'idle'; prevSample = null; lineColor = COLORS.skip;
   detector.reset();
   view?.clearTrail();
-  hideGhost();
-}
-
-function hideGhost() {
-  view.setStick(null, null, null, true);
-  view.setLaser('head', null, null, true);
-  view.setLaser('butt', null, null, true);
-}
-
-function startReplay(time) {
-  if (!lastSwing) return;
-  replay = { samples: lastSwing, start: time, i: 0 };
-  view.setTrail(lastSwing);
-  resultText = summarize(lastSwing).message;
-  liveSwing = []; detState = 'idle'; prevSample = null; // detector is not fed during replay
-}
-
-// Advance the ghost to the sample at 0.25x elapsed time; false once it has finished.
-function stepReplay(time) {
-  const { samples, start } = replay;
-  const target = samples[0].t + ((time - start) / 1000) * REPLAY_SPEED;
-  if (target > samples[samples.length - 1].t) return false;
-  while (replay.i + 1 < samples.length && samples[replay.i + 1].t <= target) replay.i++;
-  const s = samples[replay.i];
-  const { butt, head } = clubEnds(s.pos, s.dir);
-  const radius = line.width / 2;
-  const color = stateColor(s.state);
-  view.setStick(butt, head, color, true);
-  view.setLaser('head', head, s.head, true, radius, color);
-  view.setLaser('butt', butt, s.butt, true, radius, color);
-  return true;
 }
 
 async function startSession() {
@@ -154,7 +119,6 @@ async function startSession() {
   clubSrc = clubHand = null;
   prevB = false;
   prevA = false;
-  prevClick = false;
   line = null;
   lineLocked = false;
   session.addEventListener('select', onSelect);
@@ -230,12 +194,8 @@ function tick(time) {
   // Button A re-places the line without recalibrating.
   let a = false;
   for (const s of session.inputSources) a = a || !!s.gamepad?.buttons[A_BUTTON]?.pressed;
-  if (a && !prevA && idle && !replay && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; lineLocked = false; resetSwing(); }
+  if (a && !prevA && idle && (appState === 'ready' || appState === 'place')) { appState = 'place'; placing = 'aim'; lineLocked = false; resetSwing(); }
   prevA = a;
-  // Thumbstick click on the club replays the last swing (not grip: holding the controller squeezes it).
-  const click = !!clubSrc?.gamepad?.buttons[STICK_CLICK]?.pressed;
-  if (click && !prevClick && idle && appState === 'ready') startReplay(time);
-  prevClick = click;
 
   const now = performance.now();
   const dt = lastT ? Math.min((now - lastT) / 1000, 0.1) : 0;
@@ -284,7 +244,7 @@ function tick(time) {
       const club = pose ? updateClub(pose) : (hideClub(), null);
       const y = axes[3] ?? 0;
       const flick = Math.abs(y) > 0.7 ? Math.sign(y) : 0;
-      if (flick && flick !== prevFlick && detState === 'idle' && !replay) {
+      if (flick && flick !== prevFlick && detState === 'idle') {
         const w = Math.round((settings.lineWidth - flick * WIDTH_STEP) * 100) / 100; // up (negative y) = wider
         settings.lineWidth = Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, w));
         saveSettings(storage, settings);
@@ -293,34 +253,32 @@ function tick(time) {
       prevFlick = flick;
       line.width = settings.lineWidth;
       const state = classify(headHit, buttHit, unsure, line);
-      view.setLine(line, unsure ? COLORS.unsure : COLORS[state]);
+      if (state !== 'skip') lineColor = COLORS[state];
+      view.setLine(line, unsure ? COLORS.unsure : lineColor);
 
-      if (replay) {
-        if (!stepReplay(time)) { replay = null; hideGhost(); detector.reset(); }
-      } else {
-        // Plain copies: updateClub's vectors are not reused, but samples must never alias live state.
-        const sample = club && {
-          t: time / 1000, pos: { x: club.pos.x, y: club.pos.y, z: club.pos.z },
-          dir: { x: club.axis.x, y: club.axis.y, z: club.axis.z }, unsure,
-          head: headHit && { x: headHit.x, z: headHit.z }, butt: buttHit && { x: buttHit.x, z: buttHit.z }, state,
-        };
-        const r = detector.update(sample);
-        if (r.state === 'address' && detState !== 'address') {
-          view.clearTrail(); resultText = null; hideGhost(); liveSwing = [];
-        }
-        if (r.swing) {
-          lastSwing = r.swing; liveSwing = [];
-          startReplay(time);
-        } else if (r.state === 'swinging') {
-          if (detState !== 'swinging') liveSwing = prevSample ? [prevSample] : [];
-          if (sample) liveSwing.push(sample);
-          view.setTrail(liveSwing);
-        } else if (detState === 'swinging') { // abandoned (timeout or lost tracking)
-          liveSwing = []; view.clearTrail();
-        }
-        detState = r.state;
-        prevSample = sample;
+      // Plain copies: updateClub's vectors are not reused, but samples must never alias live state.
+      const sample = club && {
+        t: time / 1000, pos: { x: club.pos.x, y: club.pos.y, z: club.pos.z },
+        dir: { x: club.axis.x, y: club.axis.y, z: club.axis.z }, unsure,
+        head: headHit && { x: headHit.x, z: headHit.z }, butt: buttHit && { x: buttHit.x, z: buttHit.z }, state,
+      };
+      const r = detector.update(sample);
+      if (r.state === 'address' && detState !== 'address') {
+        view.clearTrail(); resultText = null; liveSwing = [];
       }
+      if (r.swing) {
+        liveSwing = [];
+        view.setTrail(r.swing);
+        resultText = summarize(r.swing).message;
+      } else if (r.state === 'swinging') {
+        if (detState !== 'swinging') liveSwing = prevSample ? [prevSample] : [];
+        if (sample) liveSwing.push(sample);
+        view.setTrail(liveSwing);
+      } else if (detState === 'swinging') { // abandoned (timeout or lost tracking)
+        liveSwing = []; view.clearTrail();
+      }
+      detState = r.state;
+      prevSample = sample;
       view.setText(now < widthMsgUntil ? `Line width: ${Math.round(settings.lineWidth * 100)} cm` : resultText ?? READY_PROMPT, camera);
       break;
     }
@@ -334,7 +292,7 @@ function hideClub() {
   view.setLaser('butt', null, null);
 }
 
-// Stick ends for a controller position and unit axis toward the clubhead (plain or THREE vectors).
+// Stick ends for a controller position and unit axis toward the clubhead.
 function clubEnds(p, dir) {
   const pos = new THREE.Vector3(p.x, p.y, p.z);
   const axis = new THREE.Vector3(dir.x, dir.y, dir.z);
@@ -353,10 +311,10 @@ function updateClub(pose) {
   const { butt, head } = clubEnds(pos, axis);
   view.setStick(butt, head, STICK_COLOR);
   // Hits are cast from pos, not the tips: a tip may sit below the floor at address.
-  const radius = (settings.lineWidth ?? 0.15) / 2;
+  const radius = settings.lineWidth / 4; // dot half the line's width, so it visibly sits inside the line
   headHit = floorHit(pos, axis);
   buttHit = floorHit(pos, axis.clone().negate());
-  view.setLaser('head', head, headHit, false, radius);
-  view.setLaser('butt', butt, buttHit, false, radius);
+  view.setLaser('head', head, headHit, radius);
+  view.setLaser('butt', butt, buttHit, radius);
   return { pos, axis };
 }

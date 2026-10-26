@@ -10,9 +10,9 @@ test('throwing storage gives defaults', () => {
   assert.deepEqual(loadSettings({ getItem() { throw new Error('blocked'); } }), DEFAULTS);
   assert.doesNotThrow(() => saveSettings({ setItem() { throw new Error('blocked'); } }, DEFAULTS));
 });
-test('junk JSON gives defaults', () => assert.deepEqual(loadSettings(mem({ 'lazerline.settings': '{oops' })), DEFAULTS));
+test('junk JSON gives defaults', () => assert.deepEqual(loadSettings(mem({ 'lazerline.settings.v2': '{oops' })), DEFAULTS));
 test('bad fields fall back individually', () => {
-  const s = loadSettings(mem({ 'lazerline.settings': JSON.stringify({ mode: 'laser', clubLength: 1.1, lineWidth: 5 }) }));
+  const s = loadSettings(mem({ 'lazerline.settings.v2': JSON.stringify({ mode: 'laser', clubLength: 1.1, lineWidth: 5 }) }));
   assert.deepEqual(s, { ...DEFAULTS, clubLength: 1.1, lineWidth: 0.30 });
 });
 test('round trip', () => {

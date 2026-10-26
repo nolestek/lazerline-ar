@@ -1,12 +1,12 @@
 // Persisted user settings. No three.js imports, so Node can test it.
 // Storage is injected so tests can pass a fake; every access is guarded.
 
-export const DEFAULTS = { mode: 'adapter', clubLength: 0.95, gripLength: 0.4, lineWidth: 0.15 };
+export const DEFAULTS = { mode: 'adapter', clubLength: 0.95, gripLength: 0.4, lineWidth: 0.10 };
 export const WIDTH_MIN = 0.02;
 export const WIDTH_MAX = 0.30;
 export const WIDTH_STEP = 0.01;
 
-const KEY = 'lazerline.settings';
+const KEY = 'lazerline.settings.v2'; // v2: new 10 cm default must not be masked by the old saved 15 cm
 
 const inRange = (v, lo, hi, fallback) =>
   typeof v === 'number' && v >= lo && v <= hi ? v : fallback;

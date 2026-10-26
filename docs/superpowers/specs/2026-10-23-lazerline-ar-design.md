@@ -15,7 +15,7 @@ Success: put on the headset, open a web page, calibrate in seconds, place the li
 - Two lasers along the shaft axis: one out the clubhead end, one out the grip (butt) end. A dot appears on the floor wherever an end points at the floor.
 - Live feedback: the line glows green while the active dot is on it, red when off.
 - Traced paths of both dots on the floor during the swing.
-- After each swing: a result summary and a slow-motion ghost replay showing where the swing came off plane.
+- After each swing: the colored trails stay on the floor with a result summary showing where the swing came off plane. (A slow-motion ghost replay was built, then removed after headset testing: the live line is the drill.)
 
 ## Non-goals (for now)
 
@@ -66,17 +66,17 @@ Every frame:
 - Cast a ray from the controller along +axis (clubhead end) and another along −axis (butt end).
 - If a ray points downward, intersect it with the floor plane y = 0. That's the dot.
 - A ray pointing upward or nearly horizontal has no dot. Builder's call: cap the dot distance (e.g. ignore hits more than a few meters away) so a near-horizontal shaft doesn't throw a dot across the room.
-- Draw each laser as a thin red beam from the club end to the dot, and the dot as a small red disc about the line's width.
+- Draw each laser as a thin red beam from the club end to the dot, and the dot as a small red disc half the line's width, so it visibly sits inside the line.
 
 Through a normal swing this naturally gives: the clubhead dot during takeaway, then the butt-end dot once the grip end points down (late backswing / top / early downswing), then the clubhead dot again through impact and follow-through.
 
 ### The line
 
 - Placement: aim the club at the floor and pull the trigger. The line's center snaps to the clubhead dot. Thumbstick left/right rotates the line around that point. Trigger again locks it.
-- The line is a flat strip on the floor, ~3 m long by default (builder's call), yellow when idle.
+- The line is a flat strip on the floor, 5 m long (lengthened from 3 m after headset testing so the dot stays over it more of the swing), 10 cm wide by default, yellow when idle.
 - Width: thumbstick up/down (or A/B) steps the width up and down, with a visible readout. Remember the last width (and mode, club length) in localStorage.
 - "On the line" = the dot's perpendicular distance from the line's center line (measured in the floor plane) is ≤ half the width. Dots past the ends of the line are not scored (the line isn't long enough to judge there); dots beside the line count as off.
-- Live color: green while the active dot is on, red while off.
+- Live color: green while the active dot is on, red while off. During moments nothing is scored (no dot, or dots past the line's ends) the line keeps its last green/red instead of flashing yellow.
 - Re-place the line anytime from a button.
 
 ### Swing detection
@@ -95,7 +95,7 @@ The golfer starts with slow practice swings and moves to full-speed swings as th
 
 At full speed, especially at the top of the backswing, the controller can leave the headset cameras' view. The Quest then estimates its pose from inertial sensors, which drifts. WebXR flags these poses (`emulatedPosition` on the grip/target-ray pose).
 
-- Samples with an estimated pose are marked **unsure**. They are not counted as on or off plane, and they are drawn in a neutral color (e.g. grey) on the trails and in the ghost replay.
+- Samples with an estimated pose are marked **unsure**. They are not counted as on or off plane, and they are drawn in a neutral color (e.g. grey) on the trails.
 - The result line never blames a phase for coming off plane based on unsure samples. If a large share of the swing is unsure, say so, e.g. "Tracking lost at the top — try a slower swing or face the line more."
 - Samples where a dot is missing (shaft near horizontal) don't count toward the percentage either.
 - Builder's call: light smoothing of the dots is fine if it doesn't add visible lag.
@@ -106,9 +106,7 @@ Split the swing into phases for reporting: takeaway, backswing, top, downswing, 
 
 - **Trails stay on the floor**, made of segments colored green (on) and red (off).
 - **Result line**, floating in front of the golfer: percent of samples on plane and the first phase where it went off, e.g. "92% on plane — came off at the top of the backswing". If 100%: "Great job!"
-- **Ghost replay:** a translucent stick replays the recorded poses in slow motion (~¼ speed, builder's call) with its lasers and dots. The ghost and dot turn red during off-plane samples. It plays in place, so the golfer can watch from where they stand or walk around it.
-- A "replay" button on the controller replays it again.
-- Address for the next swing clears the trails, result, and ghost.
+- Address for the next swing clears the trails and result.
 
 Only the last swing is kept.
 
@@ -119,7 +117,6 @@ Only the last swing is kept.
 | Trigger | Calibrate / place line / lock line |
 | Thumbstick L/R | Rotate line (while placing) |
 | Thumbstick U/D or A/B | Line width up/down |
-| Grip button or B/Y | Replay last swing |
 | Menu/one button | Re-calibrate or re-place line |
 
 Use whichever controller pulls the trigger first as the club.

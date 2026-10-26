@@ -1,7 +1,7 @@
 // Pure geometry helpers. No three.js imports, so Node can test them.
 
 const MAX_HORIZONTAL_DIST = 4;
-export const LINE_LENGTH = 3;
+export const LINE_LENGTH = 5;
 
 /**
  * Where a ray hits the floor (plane y = 0), or null.
